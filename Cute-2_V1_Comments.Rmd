@@ -1,0 +1,582 @@
+---
+title: "CUTe-2 : Classifictaion of Population into Low or High Income Group based on Census Data"
+author: "Sourjeet"
+date: "January 12, 2019"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+``` 
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+# Problem Statement
+
+    Given Data contains details of various attributes for a population. Based on these
+    attributes predict whether the individual belongs to low income group or high income
+    group.
+    
+# Data Dictionary {.tabset}
+    * age                 : This is a continuous feature that denotes the age of a person.
+    * working_sector      : This feature shows the type of organization a person is working in. It is a                                 categorical feature and has 7 levels.
+    * financial_weight    : This feature is a weighted attribute, used to balance the money
+    * qualification       : Educational qualification
+    * years_of_education  : number of years of education; continuous variable
+    * tax paid            : amount of tax paid by the person(continuous variable)
+    * loan taken          : it is a two level categorical variable defining whether the person has
+                            taken loan or no
+    * marital status      : categorical variable
+    * occupation          : area of work, a categorical variable with 14 levels
+    * relationship        : provides relationship status of the employee
+    * ethnicity           : social background (categorical variable )
+    * gender              : two level categorical variable
+    * gain                : it illustrates the financial gain of an person, it is a continuous variable
+    * loss                : financial loss of the person , it is a continuous variable
+    * working_hours       : it is a continuous variables describing hours of work of an
+                            employee in a week
+    * country             : describes the origin country of an employee
+    * target              : Based on the given data your model will have to classify a person into high
+                            income / low income.
+                            
+#Coding {.tabset}
+
+## Basic Initializations
+
+### Loading all basic libraries.
+
+```{r}
+library(stats)
+library(ggplot2)
+library(ggpubr)
+library(DMwR)
+library(caret)
+library(e1071)
+library(ROCR)
+library(corrplot)
+library(vegan)
+library(infotheo)
+
+```
+ Setting the Working Directory
+```{r}
+setwd("E:/Workshop/INSOFE/Program/CUTe-2")
+getwd()
+
+```
+ Reading the data into dataframes.
+```{r}
+rawData <- read.csv("train_data.csv")
+rawTest <- read.csv("test_data.csv")
+cat("Train Data has ", dim(rawData)[1]," rows & ",dim(rawData)[2]," columns.")
+cat("\nTest Data has ", dim(rawTest)[1]," rows & ",dim(rawTest)[2]," columns.")
+attach(rawData)
+
+```
+ Train Data Structure
+```{r}
+str(rawData)
+```
+ Train Data Summary
+```{r}
+summary(rawData)
+```
+ Setting the index column for both Train and Test datasets to rownames
+```{r}
+rownames(rawData) <- rawData$index
+rawData$index = NULL
+rownames(rawTest) <- rawTest$index
+rawTest$index = NULL
+```
+## Data Pre-Processing / Analysis
+### Dataset level analysis.
+ Checking the DataSet-wise and Column-wise Null Values
+```{r}
+print(" Train Data : ")
+sum(is.na(rawData))
+colSums((is.na(rawData)))
+
+print(" Test Data : ")
+sum(is.na(rawTest))
+colSums((is.na(rawTest)))
+```
+ There are multiple features with the same number of NA values. 
+ Checking one of them [Age] to verify if they belong to the same rows.
+```{r}
+rawData[is.na(rawData$age),]
+
+```
+ As suspected 12 features have NAs in these two rows.
+ Deleting...
+```{r}
+rawData <- rawData[-c(which(is.na(rawData$age))),]
+```
+ Creating a consolidated Data sets out of Train and Test Data.
+ 
+ Assigning a target feature to the Test Data set with default value as 2. This is needed to match the number of features while combining the Train and Test Datasets.
+```{r}
+rawTest$target = 2
+head(rawTest)
+
+```
+ Combining the Train and Test data sets and cross checking through the dimensions and head/tail. 
+```{r}
+combinedData <- rbind(rawData,rawTest)
+dim(combinedData)
+head(rawData)
+head(combinedData)
+tail(combinedData)
+tail(rawTest)
+combinedData$target=as.factor(combinedData$target)
+```
+ Rechecking on the Null values on the consolidated Dataset.
+```{r}
+sum(is.na(combinedData))
+colSums((is.na(combinedData)))
+```
+ Structure of the Consolidated Dataset.
+```{r}
+str(combinedData)
+
+```
+### Feature level analysis 
+
+**Age**
+
+ Plotting density plot for the "Age" feature. [only Train Data]
+```{r}
+ggdensity(combinedData[combinedData$target != 2,], x = "age",
+   add = "mean", rug = TRUE,
+   color = "target", fill = "target",
+   palette = c("blue", "red"))
+```
+ We can see from the plot above that the age feature is right skewed for target value 0, i.e. Low income group, and close to a normal distribution for value 1, i.e. High Income Group.
+ This shows that people with lesser age are more prone to fall into the low income group, specifically under the age of 35. 
+ There is a high density of people between the age of 35 and 60 and belong to the High Income Group.
+ The age group above 70 shows a similar trend among the two income groups.
+ 
+ Below we are binning the age feature as per the above observation.
+```{r}
+combinedData$binnedAge = ifelse(combinedData$age <25,0,
+                                  ifelse(combinedData$age < 35,1,
+                                         ifelse(combinedData$age < 60,2,
+                                                ifelse(combinedData$age < 70,3,4))))
+
+combinedData$binnedAge = as.factor(combinedData$binnedAge)
+combinedData$age = NULL
+str(combinedData)
+
+```
+** Working Sector **
+
+
+ Plotting density plot for the "Working Sector" feature. [only Train Data]
+```{r}
+myplot <- ggplot(combinedData[combinedData$target != 2,], aes(working_sector, group = target)) + 
+          geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+          scale_y_continuous(labels=scales::percent) +
+          theme( axis.text.x  = element_text(angle=90, vjust=0.5, size=10),legend.position="none") +
+          facet_grid(~target)
+myplot
+```
+ Observation : The category "Private" has a high relative presence in both income groups. "Self-Employed" although not as prominent, has a better representation that other categories.
+ Also the rest of the categories shows more tendency of belonging to the lower income than "Private" or "Self-Employed"
+ 
+ Performing the below level transformation for the feature according to the above observation.
+ (while making sure that the NA values are not imputed.)
+```{r}
+govt <- c("local_body","national","state")
+private <- c("private")
+self <- c("self_employed")
+combinedData$workSector = ifelse(combinedData$working_sector %in% govt, "govt",
+                                 ifelse(combinedData$working_sector %in% private, "private",
+                                        ifelse(combinedData$working_sector %in% self, "self",
+                                               ifelse(is.na(combinedData$working_sector),NA,"other"))))
+
+
+combinedData$working_sector = NULL
+combinedData$workSector = as.factor(combinedData$workSector)
+
+```
+** Financial Weight **
+
+
+ Plotting density plot for the "Financial Weight" feature. [only Train Data]
+```{r}
+ggdensity(combinedData[combinedData$target != 2,], x = "financial_weight",
+   add = "mean", rug = TRUE,
+   color = "target", fill = "target",
+   palette = c("blue", "red"))
+```
+ Observation : The distribution for this feature is almost same for both the income groups. Infering that this behaviour suggests no variance for this feature accross income groups deciding to drop the feature.
+```{r}
+combinedData$financial_weight = NULL
+```
+** Qualification , Years of Education **
+
+ By the look of the data it seems that the two features are very similar in behavior.
+ Confirming the doubt in the below table.
+```{r}
+table(combinedData$years_of_education,combinedData$qualification)
+```
+
+ From the above table we can infer that these two features have a one-to-one mapping. We can safely drop one of the features. In facvouring of keeping the readability/interpretability of the data, choosing to drop the "Years of Education " feature.
+```{r}
+combinedData$years_of_education = NULL
+```
+
+
+ Plotting density plot for the "Qualification" feature. [only Train Data]
+```{r}
+myplot <- ggplot(combinedData[combinedData$target != 2,], aes(qualification, group = target)) + 
+          geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+          scale_y_continuous(labels=scales::percent) +
+          theme( axis.text.x  = element_text(angle=90, vjust=0.5, size=10),legend.position="none") +
+          ylab("relative frequencies") +
+          facet_grid(~target)
+myplot
+```
+ Re-levelling the data based on the feature meaning and above plots
+```{r}
+levels(combinedData$qualification)
+```
+```{r}
+school = c(" 10th"," 11th"," 12th"," 1st-4th"," 5th-6th"," 7th-8th"," 9th"," Preschool")
+inClg  = c(" HS-grad"," Some-college"," Assoc-acdm"," Assoc-voc")
+postGrad = c(" Doctorate"," Prof-school"," Masters")
+
+combinedData$EduQual = ifelse(combinedData$qualification %in% school,"school",
+                                  ifelse(combinedData$qualification %in% inClg,"inClg",
+                                         ifelse(combinedData$qualification %in% postGrad, "postGrad","grad")))
+combinedData$qualification = NULL
+combinedData$EduQual = as.factor(combinedData$EduQual)
+
+```
+```{r}
+sum(is.na(combinedData))
+colSums((is.na(combinedData)))
+
+```
+```{r}
+combinedData$tax_paid = NULL
+```
+** Loan taken **
+
+
+ Plotting density plot for the "Loan Taken" feature. [only Train Data]
+```{r}
+myplot <- ggplot(combinedData[combinedData$target != 2,], aes(loan_taken, group = target)) + 
+          geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+          scale_y_continuous(labels=scales::percent) +
+          theme(legend.position="none") +
+          ylab("relative frequencies") +
+          facet_grid(~target)
+myplot
+```
+ Observation : Very similar relative distribution. Dropping the feature.
+```{r}
+combinedData$loan_taken = NULL
+```
+** Marital Status **
+
+
+ Plotting density plot for the "Marital Status" feature. [only Train Data]
+```{r}
+myplot <- ggplot(combinedData[combinedData$target != 2,], aes(marital_status, group = target)) + 
+          geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+          scale_y_continuous(labels=scales::percent) +
+          theme( axis.text.x  = element_text(angle=90, vjust=0.5, size=10),legend.position="none") +
+          ylab("relative frequencies") +
+          facet_grid(~target)
+myplot
+```
+ Observation : This feature can be broadly interpreted as whether the person is living alone or has a partner, considering the predominant nuclear families we see in the US. So relevelling the feature accordingly. 
+
+```{r}
+combinedData$stayStatus = ifelse(combinedData$marital_status %in%  c("Divorced","Never-married","Seperated","Widowed","Married-non-resident"), "Alone" , "withSpouse")
+combinedData$marital_status = NULL
+combinedData$stayStatus = as.factor(combinedData$stayStatus)
+str(combinedData)
+```
+** Occupation **
+
+
+ Plotting density plot for the "Occupation" feature. [only Train Data]
+```{r}
+myplot <- ggplot(combinedData[combinedData$target != 2,], aes(occupation, group = target)) + 
+          geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+          scale_y_continuous(labels=scales::percent) +
+          theme( axis.text.x  = element_text(angle=90, vjust=0.5, size=10),legend.position="none") +
+          ylab("relative frequencies") + 
+          facet_grid(~target)
+myplot
+
+```
+```{r}
+table(combinedData$occupation)
+```
+```{r}
+highSkill = c("clerical","managerial","sales","speciality","support")
+medSkill = c("cleaner","farming","guard","house_servant","repair","transport")
+security = c("defence","inspector")
+combinedData$occuType <- ifelse(combinedData$occupation %in% highSkill, "highskill",
+                                ifelse(combinedData$occupation %in% medSkill, "medSkill",
+                                       ifelse(combinedData$occupation %in% security, "security",
+                                              ifelse(is.na(combinedData$occupation),NA,"other"))))
+
+combinedData$occuType = as.factor(combinedData$occuType)
+combinedData$occupation = NULL
+str(combinedData)
+```
+** Relationship **
+
+
+ Plotting density plot for the "Relationship" feature. [only Train Data]
+```{r}
+myplot <- ggplot(combinedData[combinedData$target != 2,], aes(relationship, group = target)) + 
+          geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+          scale_y_continuous(labels=scales::percent) +
+          theme( axis.text.x  = element_text(angle=90, vjust=0.5, size=10),legend.position="none") +
+          ylab("relative frequencies") +
+          facet_grid(~target)
+myplot
+```
+```{r}
+myplot <- ggplot(combinedData[combinedData$target != 2,], aes(relationship, group = gender)) + 
+          geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+          scale_y_continuous(labels=scales::percent) +
+          theme( axis.text.x  = element_text(angle=90, vjust=0.5, size=10),legend.position="none") +
+          ylab("relative frequencies") +
+          facet_grid(~gender)
+myplot
+```
+```{r}
+combinedData$relationship = NULL
+```
+** Ethnicity **
+
+
+ Plotting density plot for the "ethnicity" feature. [only Train Data]
+```{r}
+myplot <- ggplot(combinedData[combinedData$target != 2,], aes(ethnicity, group = target)) + 
+          geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+          scale_y_continuous(labels=scales::percent) +
+          theme( axis.text.x  = element_text(angle=90, vjust=0.5, size=10),legend.position="none") +
+          ylab("relative frequencies") +
+          facet_grid(~target)
+myplot
+```
+```{r}
+
+combinedData$ethnicity <- ifelse(combinedData$ethnicity == " White", "White","Other")
+
+combinedData$ethnicity = as.factor(combinedData$ethnicity)
+str(combinedData)
+```
+** Gender **
+
+
+ Plotting density plot for the "gender" feature. [only Train Data]
+```{r}
+myplot <- ggplot(combinedData[combinedData$target != 2,], aes(gender, group = target)) + 
+          geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+          scale_y_continuous(labels=scales::percent) +
+          theme( axis.text.x  = element_text(angle=90, vjust=0.5, size=10),legend.position="none") +
+          ylab("relative frequencies") +
+          facet_grid(~target)
+myplot
+```
+```{r}
+combinedData$hasGained = combinedData$gain - combinedData$loss
+combinedData$hasGained = ifelse(combinedData$hasGained >0,1,
+                                 ifelse(combinedData$hasGained <0,-1, 0))
+combinedData$hasGained = as.factor(combinedData$hasGained)
+combinedData$loss = NULL
+combinedData$gain = NULL
+```
+** Gain / Loss **
+
+
+ Plotting density plot for the "Gain / Loss " features. [only Train Data]
+```{r}
+myplot <- ggplot(combinedData[combinedData$target != 2,], aes(hasGained, group = target)) + 
+          geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+          scale_y_continuous(labels=scales::percent) +
+          theme(legend.position="none") +
+          ylab("relative frequencies") +
+          facet_grid(~target)
+myplot
+```
+** Working Hours **
+
+
+ Plotting density plot for the "Working Hours" feature. [only Train Data]
+```{r}
+ggdensity(combinedData[combinedData$target != 2,], x = "working_hours",
+   add = "mean", rug = TRUE,
+   color = "target", fill = "target",
+   palette = c("blue", "red"))
+```
+```{r}
+combinedData$WorkHr = ifelse(combinedData$working_hours <36,0,
+                                  ifelse(combinedData$working_hours > 41,2,1))
+
+combinedData$WorkHr = as.factor(combinedData$WorkHr)
+combinedData$working_hours = NULL
+str(combinedData)
+
+```
+** Country **
+
+
+ Plotting density plot for the "Country" feature. [only Train Data]
+```{r}
+myplot <- ggplot(combinedData[combinedData$target != 2,], aes(country, group = target)) + 
+          geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") + 
+          scale_y_continuous(labels=scales::percent) +
+          theme( axis.text.x  = element_text(angle=90, vjust=0.5, size=10),legend.position="none") +
+          ylab("relative frequencies") + 
+          facet_grid(~target)
+myplot
+```
+```{r}
+combinedData$country <- ifelse(combinedData$country == " United-States", "USA",
+                               ifelse(is.na(combinedData$country),NA,"Other"))
+
+combinedData$country = as.factor(combinedData$country)
+str(combinedData)
+```
+```{r}
+sum(is.na(combinedData))
+colSums((is.na(combinedData)))
+```
+
+```{r}
+cobinedData_dependent <- combinedData
+combinedData_target <- combinedData$target
+cobinedData_dependent$target = NULL
+```
+```{r}
+head(cobinedData_dependent)
+
+```
+```{r}
+cobinedData_dependent=knnImputation(cobinedData_dependent,k=10,scale=T,meth="weighAvg")
+sum(is.na(cobinedData_dependent))
+```
+
+
+```{r}
+imputedCombines <- data.frame(cobinedData_dependent,combinedData_target)
+names(imputedCombines)[names(imputedCombines) == "combinedData_target"] <- "target"
+head(imputedCombines)
+tail(imputedCombines)
+```
+
+
+```{r}
+finalTestData <- imputedCombines[c(which(imputedCombines$target == 2)),]
+finalData <- imputedCombines[c(which(imputedCombines$target != 2)),]
+finalData$target = droplevels(finalData$target)
+
+finalTestData$target = NULL
+dim(finalTestData)
+dim(finalData)
+```
+######################################################ugj 
+
+```{r}
+set.seed(786)
+folds <- createFolds(factor(finalData$target), k = 5, list = FALSE)
+
+```
+### Manually creating 5 folds to do K-Fold cross validation on the train data
+```{r}
+nbSensitivity = 0
+nbSpecificity = 0
+nbBalAccuracy = 0
+nbAccuracy    = 0
+
+lrSensitivity = 0
+lrSpecificity = 0
+lrBalAccuracy = 0
+lrAccuracy    = 0
+
+for(i in 1:5){
+  dataTest  <- finalData[folds == i,]
+  dataTrain <- finalData[folds != i,]
+  testTarget_act <- dataTest$target
+  dataTest$target = NULL
+  
+  nbModel       <- naiveBayes(dataTrain$target~., dataTrain)
+  nbPrediction  <- predict(nbModel, dataTest)
+  nbConfMat     <- confusionMatrix(data = nbPrediction, reference = testTarget_act)
+  
+  nbSensitivity = nbSensitivity + nbConfMat$table[1,1]/(nbConfMat$table[1,1] + nbConfMat$table[2,1])
+  nbSpecificity = nbSpecificity + nbConfMat$table[2,2]/(nbConfMat$table[1,2] + nbConfMat$table[2,2])
+  nbAccuracy    = nbAccuracy    + (nbConfMat$table[1,1] + nbConfMat$table[2,2])/sum(nbConfMat$table)
+  
+  
+  lrModel       <- glm(target ~ ., data = dataTrain, family=binomial)
+  lrProbability <- predict(lrModel, dataTest, type = "response")
+  lrPrediction  <- ifelse(lrProbability <= 0.40, 0, 1)
+  lrConfMat     <- confusionMatrix(data = as.factor(lrPrediction), reference = testTarget_act)
+  
+  lrSensitivity = lrSensitivity + lrConfMat$table[1,1]/(lrConfMat$table[1,1] + lrConfMat$table[2,1])
+  lrSpecificity = lrSpecificity + lrConfMat$table[2,2]/(lrConfMat$table[1,2] + lrConfMat$table[2,2])
+  lrAccuracy    = lrAccuracy    + (lrConfMat$table[1,1] + lrConfMat$table[2,2])/sum(lrConfMat$table)
+  
+}
+
+nbBalAccuracy = ((nbSensitivity/5)+(nbSpecificity/5))/2
+lrBalAccuracy = ((lrSensitivity/5)+(lrSpecificity/5))/2
+
+```
+```{r}
+
+cat(" Naive Bayes Statistics ")
+cat("\n\n Average Accuracy          : ",nbAccuracy/5)
+cat("\n Average Sensitivity       : ",nbSensitivity/5)
+cat("\n Average Specificity       : ",nbSpecificity/5)
+cat("\n Average Balanced Accuracy : ",nbBalAccuracy)
+
+cat("\n\n Logistic Regression ")
+cat("\n\n Average Accuracy          : ",lrAccuracy/5)
+cat("\n Average Sensitivity       : ",lrSensitivity/5)
+cat("\n Average Specificity       : ",lrSpecificity/5)
+cat("\n Average Balanced Accuracy : ",lrBalAccuracy)
+
+```
+
+```{r}
+dim(finalTestData)
+dim(finalData)
+
+```
+```{r}
+model_NB <- naiveBayes(finalData$target~., finalData)
+nbFinalPrediction <- data.frame("target" = as.factor(predict(model_NB, finalTestData)))
+
+nbSubmission <- data.frame("index" = rownames(finalTestData),nbFinalPrediction)
+head(nbSubmission)
+```
+```{r}
+model_LR <- glm(target ~ ., data = finalData, family=binomial)
+lrFinalProbability <- predict(lrModel, finalTestData, type = "response")
+lrFinaelPrediction  <- as.factor(ifelse(lrFinalProbability <= 0.35, 0, 1))
+
+lrSubmission <- data.frame("index" = rownames(finalTestData),"target" = lrFinaelPrediction)
+head(lrSubmission)
+
+```
+
+
+```{r}
+write.csv(x = nbSubmission, file = "NBsubmission10.csv",row.names = F)
+write.csv(x = lrSubmission, file = "LRsubmission10.csv",row.names = F)
+```
